@@ -27,6 +27,7 @@ type Settings = {
   defaultVenue: string;
   defaultFemaleDiscount: string;
   defaultShowDetail: boolean;
+  selectedTemplateId: string;
 };
 
 type CalculationResult = {
@@ -60,11 +61,39 @@ type SavedShuttleItem = {
   unitPrice: number;
 };
 
+type CopyTemplate = {
+  id: string;
+  name: string;
+  content: string;
+};
+
 const HISTORY_KEY = 'badminton_activity_helper_history';
 const SETTINGS_KEY = 'badminton_activity_helper_settings';
 const BRANDS_KEY = 'badminton_activity_helper_brands';
-const SETTINGS_VERSION = 2;
+const TEMPLATES_KEY = 'badminton_activity_helper_copy_templates';
+const SETTINGS_VERSION = 3;
+const DEFAULT_TEMPLATE_ID = 'default';
 const DEFAULT_BRANDS = ['亚C', '亚S', '红超'];
+const DEFAULT_TEMPLATE_CONTENT = `本次羽毛球费用：
+
+日期：{{date}}
+{{venueLine}}{{shuttleLine}}参与人数：男生 {{maleCount}} 人，女生 {{femaleCount}} 人
+女生优惠：{{femaleDiscount}} 元/人
+
+
+男生每人：{{malePay}} 元
+女生每人：{{femalePay}} 元
+
+
+感谢大家的参与~[嘿哈]`;
+
+const defaultTemplates: CopyTemplate[] = [
+  {
+    id: DEFAULT_TEMPLATE_ID,
+    name: '默认文案',
+    content: DEFAULT_TEMPLATE_CONTENT,
+  },
+];
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -73,6 +102,7 @@ const defaultSettings: Settings = {
   defaultVenue: '凤凰山全民运动中心',
   defaultFemaleDiscount: '5',
   defaultShowDetail: false,
+  selectedTemplateId: DEFAULT_TEMPLATE_ID,
 };
 
 const makeInitialForm = (settings: Settings): FormState => ({
@@ -167,6 +197,10 @@ const safeLoadSettings = (): Settings => {
           ? parsed.defaultFemaleDiscount
           : defaultSettings.defaultFemaleDiscount,
       defaultShowDetail: Boolean(parsed.defaultShowDetail),
+      selectedTemplateId:
+        typeof parsed.selectedTemplateId === 'string'
+          ? parsed.selectedTemplateId
+          : defaultSettings.selectedTemplateId,
     };
   } catch {
     return defaultSettings;
@@ -186,30 +220,59 @@ const safeLoadBrands = () => {
   }
 };
 
+const safeLoadTemplates = () => {
+  try {
+    const raw = localStorage.getItem(TEMPLATES_KEY);
+    if (!raw) return defaultTemplates;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return defaultTemplates;
+    const customTemplates = parsed.filter(
+      (item): item is CopyTemplate =>
+        typeof item?.id === 'string' &&
+        typeof item?.name === 'string' &&
+        typeof item?.content === 'string',
+    );
+    const hasDefault = customTemplates.some((item) => item.id === DEFAULT_TEMPLATE_ID);
+    return hasDefault ? customTemplates : [...defaultTemplates, ...customTemplates];
+  } catch {
+    return defaultTemplates;
+  }
+};
+
 const getShuttleSummary = (items: SavedShuttleItem[]) =>
   items
     .filter((item) => item.brand && item.count > 0)
     .map((item) => `${item.brand} ${item.count}个`)
     .join('，');
 
-const buildCopyText = (record: HistoryRecord) => {
+const getTemplateVariables = (record: HistoryRecord) => {
   const venueLine = record.venue.trim() ? `场地：${record.venue.trim()}\n` : '';
   const shuttleLine = getShuttleSummary(record.shuttleItems);
   const shuttleText = shuttleLine ? `用球：${shuttleLine}\n` : '';
 
-  return `本次羽毛球费用：
+  return {
+    date: record.date,
+    venue: record.venue.trim(),
+    venueLine,
+    shuttleSummary: shuttleLine,
+    shuttleLine: shuttleText,
+    courtFee: money(record.courtFee),
+    shuttleFee: money(record.shuttleFee),
+    totalFee: money(record.totalFee),
+    totalPeople: String(record.totalPeople),
+    maleCount: String(record.maleCount),
+    femaleCount: String(record.femaleCount),
+    femaleDiscount: money(record.femaleDiscount),
+    malePay: money(record.malePay),
+    femalePay: money(record.femalePay),
+  };
+};
 
-日期：${record.date}
-${venueLine}
-${shuttleText}参与人数：男生 ${record.maleCount} 人，女生 ${record.femaleCount} 人
-女生优惠：${money(record.femaleDiscount)} 元/人
-
-
-男生每人：${money(record.malePay)} 元
-女生每人：${money(record.femalePay)} 元
-
-
-感谢大家的参与~[嘿哈]`;
+const buildCopyText = (record: HistoryRecord, templateContent = DEFAULT_TEMPLATE_CONTENT) => {
+  const variables = getTemplateVariables(record);
+  return templateContent.replace(/\{\{\s*(\w+)\s*\}\}/g, (match, key: string) =>
+    key in variables ? variables[key as keyof typeof variables] : match,
+  );
 };
 
 function App() {
@@ -217,6 +280,7 @@ function App() {
   const [form, setForm] = useState<FormState>(() => makeInitialForm(safeLoadSettings()));
   const [history, setHistory] = useState<HistoryRecord[]>(() => safeLoadHistory());
   const [brands, setBrands] = useState<string[]>(() => safeLoadBrands());
+  const [templates, setTemplates] = useState<CopyTemplate[]>(() => safeLoadTemplates());
   const [activeTab, setActiveTab] = useState<TabKey>('calculator');
   const [result, setResult] = useState<CalculationResult | null>(null);
   const [error, setError] = useState('');
@@ -224,7 +288,12 @@ function App() {
   const [manualCopyText, setManualCopyText] = useState('');
   const [copyDraft, setCopyDraft] = useState('');
   const [newBrand, setNewBrand] = useState('');
+  const [templateName, setTemplateName] = useState('');
+  const [templateContent, setTemplateContent] = useState('');
   const [detailRecordId, setDetailRecordId] = useState<string | null>(null);
+
+  const selectedTemplate =
+    templates.find((item) => item.id === settings.selectedTemplateId) ?? templates[0];
 
   const keepInputVisible = (element: HTMLElement) => {
     window.setTimeout(() => {
@@ -255,6 +324,20 @@ function App() {
       setNotice('品牌保存失败，请检查浏览器存储权限。');
     }
   }, [brands]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(TEMPLATES_KEY, JSON.stringify(templates));
+    } catch {
+      setNotice('文案样式保存失败，请检查浏览器存储权限。');
+    }
+  }, [templates]);
+
+  useEffect(() => {
+    if (!selectedTemplate) return;
+    setTemplateName(selectedTemplate.name);
+    setTemplateContent(selectedTemplate.content);
+  }, [selectedTemplate]);
 
   const currentRecord = useMemo<HistoryRecord | null>(() => {
     if (!result) return null;
@@ -415,7 +498,7 @@ function App() {
         femalePay,
         showDetail: form.showDetail,
         createdAt: '',
-      }));
+      }, selectedTemplate.content));
     }, 0);
   };
 
@@ -505,7 +588,7 @@ function App() {
     setError('');
     setNotice('已回填历史记录。');
     setManualCopyText('');
-    setCopyDraft(buildCopyText(record));
+    setCopyDraft(buildCopyText(record, selectedTemplate.content));
     setActiveTab('calculator');
   };
 
@@ -525,6 +608,49 @@ function App() {
   const updateSetting = <K extends keyof Settings>(key: K, value: Settings[K]) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
     setNotice('设置已保存。');
+  };
+
+  const selectTemplate = (templateId: string) => {
+    const template = templates.find((item) => item.id === templateId);
+    if (!template) return;
+    setSettings((prev) => ({ ...prev, selectedTemplateId: templateId }));
+    setTemplateName(template.name);
+    setTemplateContent(template.content);
+    setNotice('文案样式已切换。');
+  };
+
+  const saveTemplate = () => {
+    if (!selectedTemplate) return;
+    const name = templateName.trim() || selectedTemplate.name;
+    setTemplates((prev) =>
+      prev.map((item) =>
+        item.id === selectedTemplate.id ? { ...item, name, content: templateContent } : item,
+      ),
+    );
+    setNotice('文案样式已保存。');
+  };
+
+  const saveAsTemplate = () => {
+    const name = templateName.trim() || '新文案样式';
+    const template: CopyTemplate = {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      name,
+      content: templateContent,
+    };
+    setTemplates((prev) => [...prev, template]);
+    setSettings((prev) => ({ ...prev, selectedTemplateId: template.id }));
+    setNotice('新文案样式已保存。');
+  };
+
+  const deleteTemplate = () => {
+    if (!selectedTemplate || selectedTemplate.id === DEFAULT_TEMPLATE_ID) {
+      setNotice('默认文案样式不能删除。');
+      return;
+    }
+    if (!window.confirm('确认删除当前文案样式吗？')) return;
+    setTemplates((prev) => prev.filter((item) => item.id !== selectedTemplate.id));
+    setSettings((prev) => ({ ...prev, selectedTemplateId: DEFAULT_TEMPLATE_ID }));
+    setNotice('文案样式已删除。');
   };
 
   return (
@@ -781,7 +907,7 @@ function App() {
                 <div className="copy-editor">
                   <h2>收款文案</h2>
                   <textarea
-                    value={copyDraft || buildCopyText(currentRecord)}
+                    value={copyDraft || buildCopyText(currentRecord, selectedTemplate.content)}
                     onChange={(event) => setCopyDraft(event.target.value)}
                   />
                 </div>
@@ -849,7 +975,11 @@ function App() {
                     >
                       查看详情
                     </button>
-                    <button onClick={() => void copyText(buildCopyText(record))}>复制文案</button>
+                    <button
+                      onClick={() => void copyText(buildCopyText(record, selectedTemplate.content))}
+                    >
+                      复制文案
+                    </button>
                     <button onClick={() => refillFromHistory(record)}>再次计算</button>
                     <button className="danger" onClick={() => deleteRecord(record.id)}>
                       删除
@@ -913,6 +1043,60 @@ function App() {
               <button className="danger full" onClick={clearAllHistory}>
                 清空全部历史记录
               </button>
+            </div>
+
+            <div className="card form-card">
+              <div className="section-title">
+                <strong>文案样式</strong>
+              </div>
+              <label>
+                当前样式
+                <select
+                  value={selectedTemplate.id}
+                  onChange={(event) => selectTemplate(event.target.value)}
+                >
+                  {templates.map((template) => (
+                    <option value={template.id} key={template.id}>
+                      {template.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                样式名称
+                <input
+                  value={templateName}
+                  onFocus={(event) => keepInputVisible(event.currentTarget)}
+                  onChange={(event) => setTemplateName(event.target.value)}
+                  placeholder="如微信群收款文案"
+                />
+              </label>
+              <label>
+                模板内容
+                <textarea
+                  className="template-textarea"
+                  value={templateContent}
+                  onFocus={(event) => keepInputVisible(event.currentTarget)}
+                  onChange={(event) => setTemplateContent(event.target.value)}
+                />
+              </label>
+              <div className="variable-list">
+                <span>{'{{date}}'}</span>
+                <span>{'{{venueLine}}'}</span>
+                <span>{'{{shuttleLine}}'}</span>
+                <span>{'{{maleCount}}'}</span>
+                <span>{'{{femaleCount}}'}</span>
+                <span>{'{{femaleDiscount}}'}</span>
+                <span>{'{{malePay}}'}</span>
+                <span>{'{{femalePay}}'}</span>
+              </div>
+              <div className="mini-actions">
+                <button onClick={saveTemplate}>保存样式</button>
+                <button onClick={saveAsTemplate}>另存为新样式</button>
+                <button className="danger" onClick={deleteTemplate}>
+                  删除样式
+                </button>
+              </div>
             </div>
           </section>
         )}
