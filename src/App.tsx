@@ -8,10 +8,18 @@ type FormState = {
   date: string;
   courtFee: string;
   shuttleFee: string;
+  shuttleItems: ShuttleItem[];
   maleCount: string;
   femaleCount: string;
   femaleDiscount: string;
   showDetail: boolean;
+};
+
+type ShuttleItem = {
+  id: string;
+  brand: string;
+  count: string;
+  unitPrice: string;
 };
 
 type Settings = {
@@ -34,6 +42,7 @@ type HistoryRecord = {
   date: string;
   courtFee: number;
   shuttleFee: number;
+  shuttleItems: SavedShuttleItem[];
   maleCount: number;
   femaleCount: number;
   femaleDiscount: number;
@@ -45,9 +54,17 @@ type HistoryRecord = {
   createdAt: string;
 };
 
+type SavedShuttleItem = {
+  brand: string;
+  count: number;
+  unitPrice: number;
+};
+
 const HISTORY_KEY = 'badminton_activity_helper_history';
 const SETTINGS_KEY = 'badminton_activity_helper_settings';
+const BRANDS_KEY = 'badminton_activity_helper_brands';
 const SETTINGS_VERSION = 2;
+const DEFAULT_BRANDS = ['亚C', '亚S', '红超'];
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -63,6 +80,7 @@ const makeInitialForm = (settings: Settings): FormState => ({
   date: today(),
   courtFee: '',
   shuttleFee: '',
+  shuttleItems: [],
   maleCount: '',
   femaleCount: '',
   femaleDiscount: settings.defaultFemaleDiscount,
@@ -79,6 +97,13 @@ const money = (value: number) => {
       });
 };
 
+const makeShuttleItem = (brand = DEFAULT_BRANDS[0]): ShuttleItem => ({
+  id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  brand,
+  count: '',
+  unitPrice: '',
+});
+
 const parseMoney = (value: string) => {
   if (value.trim() === '') return null;
   const parsed = Number(value);
@@ -91,6 +116,16 @@ const parseCount = (value: string) => {
   return Number.isInteger(parsed) ? parsed : null;
 };
 
+const parseOptionalCount = (value: string) => {
+  if (value.trim() === '') return 0;
+  return parseCount(value);
+};
+
+const parseOptionalMoney = (value: string) => {
+  if (value.trim() === '') return 0;
+  return parseMoney(value);
+};
+
 const sortHistory = (records: HistoryRecord[]) =>
   [...records].sort((a, b) => {
     const dateDiff = b.date.localeCompare(a.date);
@@ -98,12 +133,17 @@ const sortHistory = (records: HistoryRecord[]) =>
     return b.createdAt.localeCompare(a.createdAt);
   });
 
+const normalizeHistoryRecord = (record: HistoryRecord): HistoryRecord => ({
+  ...record,
+  shuttleItems: Array.isArray(record.shuttleItems) ? record.shuttleItems : [],
+});
+
 const safeLoadHistory = (): HistoryRecord[] => {
   try {
     const raw = localStorage.getItem(HISTORY_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? sortHistory(parsed) : [];
+    return Array.isArray(parsed) ? sortHistory(parsed.map(normalizeHistoryRecord)) : [];
   } catch {
     return [];
   }
@@ -133,56 +173,57 @@ const safeLoadSettings = (): Settings => {
   }
 };
 
+const safeLoadBrands = () => {
+  try {
+    const raw = localStorage.getItem(BRANDS_KEY);
+    if (!raw) return DEFAULT_BRANDS;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return DEFAULT_BRANDS;
+    const merged = [...DEFAULT_BRANDS, ...parsed.filter((item) => typeof item === 'string')];
+    return Array.from(new Set(merged.map((item) => item.trim()).filter(Boolean)));
+  } catch {
+    return DEFAULT_BRANDS;
+  }
+};
+
+const getShuttleSummary = (items: SavedShuttleItem[]) =>
+  items
+    .filter((item) => item.brand && item.count > 0)
+    .map((item) => `${item.brand} ${item.count}个`)
+    .join('，');
+
 const buildCopyText = (record: HistoryRecord) => {
   const venueLine = record.venue.trim() ? `场地：${record.venue.trim()}\n` : '';
-
-  if (!record.showDetail) {
-    return `本次羽毛球费用：
-
-日期：${record.date}
-${venueLine}
-场地费：${money(record.courtFee)} 元
-球费：${money(record.shuttleFee)} 元
-总费用：${money(record.totalFee)} 元
-
-参与人数：男生 ${record.maleCount} 人，女生 ${record.femaleCount} 人
-女生优惠：${money(record.femaleDiscount)} 元/人
-
-男生每人：${money(record.malePay)} 元
-女生每人：${money(record.femalePay)} 元`;
-  }
+  const shuttleLine = getShuttleSummary(record.shuttleItems);
+  const shuttleText = shuttleLine ? `用球：${shuttleLine}\n` : '';
 
   return `本次羽毛球费用：
 
 日期：${record.date}
 ${venueLine}
-场地费：${money(record.courtFee)} 元
-球费：${money(record.shuttleFee)} 元
-总费用：${money(record.courtFee)} + ${money(record.shuttleFee)} = ${money(record.totalFee)} 元
+${shuttleText}参与人数：男生 ${record.maleCount} 人，女生 ${record.femaleCount} 人
+女生优惠：${money(record.femaleDiscount)} 元/人
 
-男生 ${record.maleCount} 人，女生 ${record.femaleCount} 人，共 ${record.totalPeople} 人
-女生每人优惠：${money(record.femaleDiscount)} 元
 
-男生每人：
-(${money(record.totalFee)} + ${record.femaleCount} × ${money(record.femaleDiscount)}) ÷ ${record.totalPeople} = ${money(record.malePay)} 元
-
-女生每人：
-${money(record.malePay)} - ${money(record.femaleDiscount)} = ${money(record.femalePay)} 元
-
-最终：
 男生每人：${money(record.malePay)} 元
-女生每人：${money(record.femalePay)} 元`;
+女生每人：${money(record.femalePay)} 元
+
+
+感谢大家的参与~[嘿哈]`;
 };
 
 function App() {
   const [settings, setSettings] = useState<Settings>(() => safeLoadSettings());
   const [form, setForm] = useState<FormState>(() => makeInitialForm(safeLoadSettings()));
   const [history, setHistory] = useState<HistoryRecord[]>(() => safeLoadHistory());
+  const [brands, setBrands] = useState<string[]>(() => safeLoadBrands());
   const [activeTab, setActiveTab] = useState<TabKey>('calculator');
   const [result, setResult] = useState<CalculationResult | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [manualCopyText, setManualCopyText] = useState('');
+  const [copyDraft, setCopyDraft] = useState('');
+  const [newBrand, setNewBrand] = useState('');
   const [detailRecordId, setDetailRecordId] = useState<string | null>(null);
 
   const keepInputVisible = (element: HTMLElement) => {
@@ -207,10 +248,25 @@ function App() {
     }
   }, [settings]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(BRANDS_KEY, JSON.stringify(brands));
+    } catch {
+      setNotice('品牌保存失败，请检查浏览器存储权限。');
+    }
+  }, [brands]);
+
   const currentRecord = useMemo<HistoryRecord | null>(() => {
     if (!result) return null;
     const courtFee = parseMoney(form.courtFee) ?? 0;
     const shuttleFee = parseMoney(form.shuttleFee) ?? 0;
+    const shuttleItems = form.shuttleItems
+      .map((item) => ({
+        brand: item.brand.trim(),
+        count: parseOptionalCount(item.count) ?? 0,
+        unitPrice: parseOptionalMoney(item.unitPrice) ?? 0,
+      }))
+      .filter((item) => item.brand && item.count > 0);
     const maleCount = parseCount(form.maleCount) ?? 0;
     const femaleCount = parseCount(form.femaleCount) ?? 0;
     const femaleDiscount = parseMoney(form.femaleDiscount) ?? 0;
@@ -221,6 +277,7 @@ function App() {
       date: form.date,
       courtFee,
       shuttleFee,
+      shuttleItems,
       maleCount,
       femaleCount,
       femaleDiscount,
@@ -240,6 +297,57 @@ function App() {
     setManualCopyText('');
   };
 
+  const updateShuttleItem = <K extends keyof ShuttleItem>(
+    id: string,
+    key: K,
+    value: ShuttleItem[K],
+  ) => {
+    setForm((prev) => {
+      const shuttleItems = prev.shuttleItems.map((item) =>
+        item.id === id ? { ...item, [key]: value } : item,
+      );
+      const shuttleFee = String(
+        shuttleItems.reduce((sum, item) => {
+          const count = parseOptionalCount(item.count);
+          const unitPrice = parseOptionalMoney(item.unitPrice);
+          if (count === null || unitPrice === null) return sum;
+          return sum + count * unitPrice;
+        }, 0),
+      );
+      return { ...prev, shuttleItems, shuttleFee };
+    });
+    setError('');
+    setNotice('');
+    setManualCopyText('');
+  };
+
+  const addShuttleItem = () => {
+    setForm((prev) => ({ ...prev, shuttleItems: [...prev.shuttleItems, makeShuttleItem()] }));
+  };
+
+  const removeShuttleItem = (id: string) => {
+    setForm((prev) => {
+      const shuttleItems = prev.shuttleItems.filter((item) => item.id !== id);
+      const shuttleFee = String(
+        shuttleItems.reduce((sum, item) => {
+          const count = parseOptionalCount(item.count);
+          const unitPrice = parseOptionalMoney(item.unitPrice);
+          if (count === null || unitPrice === null) return sum;
+          return sum + count * unitPrice;
+        }, 0),
+      );
+      return { ...prev, shuttleItems, shuttleFee };
+    });
+  };
+
+  const addBrand = () => {
+    const brand = newBrand.trim();
+    if (!brand) return;
+    setBrands((prev) => (prev.includes(brand) ? prev : [...prev, brand]));
+    setNewBrand('');
+    setNotice('品牌已新增。');
+  };
+
   const validateAndCalculate = () => {
     setNotice('');
     setManualCopyText('');
@@ -249,9 +357,15 @@ function App() {
     const maleCount = parseCount(form.maleCount);
     const femaleCount = parseCount(form.femaleCount);
     const femaleDiscount = parseMoney(form.femaleDiscount);
+    const hasInvalidShuttleItem = form.shuttleItems.some((item) => {
+      const count = parseOptionalCount(item.count);
+      const unitPrice = parseOptionalMoney(item.unitPrice);
+      return count === null || unitPrice === null || count < 0 || unitPrice < 0;
+    });
 
     if (courtFee === null) return setError('请填写有效的场地费。');
     if (shuttleFee === null) return setError('请填写有效的球费。');
+    if (hasInvalidShuttleItem) return setError('请填写有效的用球数量和单价，不能小于 0。');
     if (maleCount === null) return setError('请填写有效的男生数量，人数必须是整数。');
     if (femaleCount === null) return setError('请填写有效的女生数量，人数必须是整数。');
     if (femaleDiscount === null) return setError('请填写有效的女生优惠金额。');
@@ -278,6 +392,31 @@ function App() {
 
     setError('');
     setResult({ totalFee, totalPeople, malePay, femalePay });
+    window.setTimeout(() => {
+      setCopyDraft(buildCopyText({
+        id: '',
+        venue: form.venue.trim(),
+        date: form.date,
+        courtFee,
+        shuttleFee,
+        shuttleItems: form.shuttleItems
+          .map((item) => ({
+            brand: item.brand.trim(),
+            count: parseOptionalCount(item.count) ?? 0,
+            unitPrice: parseOptionalMoney(item.unitPrice) ?? 0,
+          }))
+          .filter((item) => item.brand && item.count > 0),
+        maleCount,
+        femaleCount,
+        femaleDiscount,
+        totalFee,
+        totalPeople,
+        malePay,
+        femalePay,
+        showDetail: form.showDetail,
+        createdAt: '',
+      }));
+    }, 0);
   };
 
   const resetForm = () => {
@@ -286,6 +425,7 @@ function App() {
     setError('');
     setNotice('');
     setManualCopyText('');
+    setCopyDraft('');
   };
 
   const saveRecord = () => {
@@ -336,7 +476,7 @@ function App() {
   };
 
   const copyCurrent = () => {
-    if (currentRecord) void copyText(buildCopyText(currentRecord));
+    if (currentRecord) void copyText(copyDraft || buildCopyText(currentRecord));
   };
 
   const refillFromHistory = (record: HistoryRecord) => {
@@ -345,6 +485,12 @@ function App() {
       date: record.date,
       courtFee: String(record.courtFee),
       shuttleFee: String(record.shuttleFee),
+      shuttleItems: record.shuttleItems.map((item) => ({
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        brand: item.brand,
+        count: String(item.count),
+        unitPrice: String(item.unitPrice),
+      })),
       maleCount: String(record.maleCount),
       femaleCount: String(record.femaleCount),
       femaleDiscount: String(record.femaleDiscount),
@@ -359,6 +505,7 @@ function App() {
     setError('');
     setNotice('已回填历史记录。');
     setManualCopyText('');
+    setCopyDraft(buildCopyText(record));
     setActiveTab('calculator');
   };
 
@@ -425,7 +572,7 @@ function App() {
                   />
                 </label>
                 <label>
-                  球费
+                  球费总额（可手动修改）
                   <input
                     type="number"
                     min="0"
@@ -437,6 +584,81 @@ function App() {
                     placeholder="0.00"
                   />
                 </label>
+              </div>
+              <div className="shuttle-section">
+                <div className="section-title">
+                  <strong>用球明细</strong>
+                  <button type="button" onClick={addShuttleItem}>
+                    新增用球
+                  </button>
+                </div>
+                {form.shuttleItems.map((item) => (
+                  <div className="shuttle-item" key={item.id}>
+                    <label>
+                      品牌
+                      <select
+                        value={item.brand}
+                        onChange={(event) =>
+                          updateShuttleItem(item.id, 'brand', event.target.value)
+                        }
+                      >
+                        {brands.map((brand) => (
+                          <option value={brand} key={brand}>
+                            {brand}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      个数
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        inputMode="numeric"
+                        value={item.count}
+                        onFocus={(event) => keepInputVisible(event.currentTarget)}
+                        onChange={(event) =>
+                          updateShuttleItem(item.id, 'count', event.target.value)
+                        }
+                        placeholder="0"
+                      />
+                    </label>
+                    <label>
+                      单价
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        inputMode="decimal"
+                        value={item.unitPrice}
+                        onFocus={(event) => keepInputVisible(event.currentTarget)}
+                        onChange={(event) =>
+                          updateShuttleItem(item.id, 'unitPrice', event.target.value)
+                        }
+                        placeholder="0"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="danger icon-action"
+                      onClick={() => removeShuttleItem(item.id)}
+                    >
+                      删除
+                    </button>
+                  </div>
+                ))}
+                <div className="brand-add">
+                  <input
+                    value={newBrand}
+                    onFocus={(event) => keepInputVisible(event.currentTarget)}
+                    onChange={(event) => setNewBrand(event.target.value)}
+                    placeholder="新增品牌"
+                  />
+                  <button type="button" className="secondary" onClick={addBrand}>
+                    添加
+                  </button>
+                </div>
               </div>
               <div className="grid-two">
                 <label>
@@ -556,6 +778,13 @@ function App() {
                     复制收款文案
                   </button>
                 </div>
+                <div className="copy-editor">
+                  <h2>收款文案</h2>
+                  <textarea
+                    value={copyDraft || buildCopyText(currentRecord)}
+                    onChange={(event) => setCopyDraft(event.target.value)}
+                  />
+                </div>
               </div>
             )}
 
@@ -603,6 +832,9 @@ function App() {
                     <div className="detail-box compact">
                       <p>场地费：{money(record.courtFee)} 元</p>
                       <p>球费：{money(record.shuttleFee)} 元</p>
+                      {getShuttleSummary(record.shuttleItems) && (
+                        <p>用球：{getShuttleSummary(record.shuttleItems)}</p>
+                      )}
                       <p>女生优惠：{money(record.femaleDiscount)} 元/人</p>
                       <p>总人数：{record.totalPeople} 人</p>
                       <p>创建时间：{new Date(record.createdAt).toLocaleString()}</p>

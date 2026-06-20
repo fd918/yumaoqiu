@@ -96,7 +96,20 @@ input {
   outline: none;
 }
 
-input:focus {
+select {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid #cfdae6;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #f9fbfd;
+  color: #172033;
+  font-size: 16px;
+  outline: none;
+}
+
+input:focus,
+select:focus {
   border-color: #168466;
   background: #fff;
   box-shadow: 0 0 0 3px rgba(22, 132, 102, 0.12);
@@ -119,6 +132,47 @@ input:focus {
   width: 22px;
   min-height: 22px;
   accent-color: #168466;
+}
+
+.shuttle-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f6f9fc;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.section-title button {
+  min-height: 34px;
+  background: #e5f5ee;
+  color: #0f6b51;
+  font-size: 13px;
+}
+
+.shuttle-item {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr 0.8fr auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.icon-action {
+  min-height: 44px;
+  padding: 10px;
+}
+
+.brand-add {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
 }
 
 .action-row {
@@ -294,6 +348,21 @@ textarea {
   padding: 16px 16px 0;
 }
 
+.copy-editor {
+  margin-top: 4px;
+  border-top: 1px solid #e5edf4;
+  padding-top: 12px;
+}
+
+.copy-editor h2 {
+  padding: 0;
+}
+
+.copy-editor textarea {
+  width: 100%;
+  margin: 12px 0 0;
+}
+
 .bottom-tabs {
   position: fixed;
   right: 0;
@@ -331,7 +400,12 @@ textarea {
   .grid-two,
   .result-grid,
   .pay-panel,
-  .action-row {
+  .action-row,
+  .shuttle-item {
+    grid-template-columns: 1fr;
+  }
+
+  .brand-add {
     grid-template-columns: 1fr;
   }
 }
