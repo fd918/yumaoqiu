@@ -15,6 +15,7 @@ type FormState = {
 };
 
 type Settings = {
+  version: number;
   defaultVenue: string;
   defaultFemaleDiscount: string;
   defaultShowDetail: boolean;
@@ -46,12 +47,14 @@ type HistoryRecord = {
 
 const HISTORY_KEY = 'badminton_activity_helper_history';
 const SETTINGS_KEY = 'badminton_activity_helper_settings';
+const SETTINGS_VERSION = 2;
 
 const today = () => new Date().toISOString().slice(0, 10);
 
 const defaultSettings: Settings = {
-  defaultVenue: '',
-  defaultFemaleDiscount: '0',
+  version: SETTINGS_VERSION,
+  defaultVenue: '凤凰山全民运动中心',
+  defaultFemaleDiscount: '5',
   defaultShowDetail: false,
 };
 
@@ -66,7 +69,15 @@ const makeInitialForm = (settings: Settings): FormState => ({
   showDetail: settings.defaultShowDetail,
 });
 
-const money = (value: number) => value.toFixed(2);
+const money = (value: number) => {
+  const rounded = Math.round((value + Number.EPSILON) * 100) / 100;
+  return Object.is(rounded, -0)
+    ? '0'
+    : rounded.toLocaleString('en-US', {
+        maximumFractionDigits: 2,
+        useGrouping: false,
+      });
+};
 
 const parseMoney = (value: string) => {
   if (value.trim() === '') return null;
@@ -103,12 +114,18 @@ const safeLoadSettings = (): Settings => {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return defaultSettings;
     const parsed = JSON.parse(raw) as Partial<Settings>;
+    const isCurrentVersion = parsed.version === SETTINGS_VERSION;
     return {
-      defaultVenue: typeof parsed.defaultVenue === 'string' ? parsed.defaultVenue : '',
+      version: SETTINGS_VERSION,
+      defaultVenue:
+        typeof parsed.defaultVenue === 'string' && (isCurrentVersion || parsed.defaultVenue)
+          ? parsed.defaultVenue
+          : defaultSettings.defaultVenue,
       defaultFemaleDiscount:
-        typeof parsed.defaultFemaleDiscount === 'string'
+        typeof parsed.defaultFemaleDiscount === 'string' &&
+        (isCurrentVersion || parsed.defaultFemaleDiscount !== '0')
           ? parsed.defaultFemaleDiscount
-          : '0',
+          : defaultSettings.defaultFemaleDiscount,
       defaultShowDetail: Boolean(parsed.defaultShowDetail),
     };
   } catch {
